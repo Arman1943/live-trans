@@ -517,12 +517,8 @@ const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const VOSK_MODELS = {
   'en': 'vosk-model-small-en-us.tar.gz',
   'es': 'vosk-model-small-es.tar.gz',
-  'fr': 'vosk-model-small-fr-0.22.tar.gz',
-  'de': 'vosk-model-small-de-0.15.tar.gz',
   'it': 'vosk-model-small-it.tar.gz',
   'ja': 'vosk-model-small-ja.tar.gz',
-  'ru': 'vosk-model-small-ru-0.22.tar.gz',
-  'zh': 'vosk-model-small-cn-0.22.tar.gz'
   // Remember to actually download these files and put them in your folder
 };
 
@@ -810,18 +806,20 @@ async function loadVoskModel(langCode) {
     return false;
   }
 
-  els.listenStatusText.textContent = `Loading ${LANG_MAP[langCode][1]} model...`;
+  els.listenStatus.textContent = `Loading ${LANG_MAP[langCode][1]} model...`;
   els.listenStatus.classList.add('show');
 
   try {
+    // Generate an absolute URL. Blob workers break relative paths on GitHub Pages!
+    const baseUrl = window.location.href.split('?')[0].replace(/\/[^\/]*$/, '/');
+    const absoluteModelUrl = baseUrl + modelFile;
+
+    // Check if we already downloaded and initialized this model
     if (!loadedModels[langCode]) {
-      loadedModels[langCode] = await Vosk.createModel(modelFile);
+      loadedModels[langCode] = await Vosk.createModel(absoluteModelUrl);
     }
     
-    if (recognizer) {
-      recognizer.free();
-    }
-    
+    // Create a new recognizer for the selected language
     recognizer = new loadedModels[langCode].KaldiRecognizer();
     
     recognizer.on("result", (message) => {
@@ -838,7 +836,7 @@ async function loadVoskModel(langCode) {
       }
     });
 
-    els.listenStatusText.textContent = "Listening";
+    els.listenStatus.textContent = "Listening";
     return true;
   } catch (err) {
     console.error(err);
