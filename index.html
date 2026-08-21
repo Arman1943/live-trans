@@ -837,7 +837,7 @@ async function loadVoskModel(langCode) {
       loadedModels[langCode] = await Vosk.createModel(absoluteModelUrl);
     }
     
-    recognizer = new loadedModels[langCode].KaldiRecognizer();
+    recognizer = new loadedModels[langCode].KaldiRecognizer(16000);
     
     recognizer.on("result", (message) => {
       const text = message.result.text;
