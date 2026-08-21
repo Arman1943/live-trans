@@ -810,16 +810,33 @@ async function loadVoskModel(langCode) {
   els.listenStatus.classList.add('show');
 
   try {
-    // Generate an absolute URL. Blob workers break relative paths on GitHub Pages!
-    const baseUrl = window.location.href.split('?')[0].replace(/\/[^\/]*$/, '/');
+    // 1. Build a perfectly accurate absolute URL (fixes the GitHub Pages path bug)
+    let currentUrl = window.location.href.split('?')[0].split('#')[0];
+    if (!currentUrl.endsWith('/') && !currentUrl.endsWith('.html')) {
+        currentUrl += '/'; 
+    }
+    const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
     const absoluteModelUrl = baseUrl + modelFile;
 
-    // Check if we already downloaded and initialized this model
+    // 2. DIAGNOSTIC TOOL: Explicitly test the URL before handing it to the AI
+    try {
+      const checkRes = await fetch(absoluteModelUrl, { method: 'HEAD' });
+      if (!checkRes.ok) {
+        alert("🚨 404 ERROR DETECTED 🚨\n\nThe app is looking for the file at this EXACT link:\n\n" + absoluteModelUrl + "\n\nBut the server says it is not there (Status " + checkRes.status + ").\n\nCheck your GitHub repository to make sure the file is uploaded, spelled perfectly, and not inside a sub-folder.");
+        els.listenStatus.classList.remove('show');
+        return false;
+      }
+    } catch (e) {
+      alert("🚨 NETWORK ERROR 🚨\n\nCould not connect to check the file at:\n" + absoluteModelUrl + "\n\nError details: " + e.message);
+      els.listenStatus.classList.remove('show');
+      return false;
+    }
+
+    // 3. Actually load the model into memory
     if (!loadedModels[langCode]) {
       loadedModels[langCode] = await Vosk.createModel(absoluteModelUrl);
     }
     
-    // Create a new recognizer for the selected language
     recognizer = new loadedModels[langCode].KaldiRecognizer();
     
     recognizer.on("result", (message) => {
@@ -839,8 +856,8 @@ async function loadVoskModel(langCode) {
     els.listenStatus.textContent = "Listening";
     return true;
   } catch (err) {
-    console.error(err);
-    showToast("Failed to load model file.");
+    // If the file exists but Vosk crashes while reading it (e.g., corrupted .tar.gz)
+    alert("🚨 AI ENGINE CRASH 🚨\n\nVosk failed to read the model file. Error details:\n\n" + err.message);
     els.listenStatus.classList.remove('show');
     return false;
   }
