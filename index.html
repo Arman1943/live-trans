@@ -522,7 +522,8 @@ const VOSK_MODELS = {
   // Remember to actually download these files and put them in your folder
 };
 
-const loadedModels = {};
+let currentModel = null;
+let currentModelLang = null;
 let recognizer = null;
 let audioContext = null;
 
@@ -806,11 +807,16 @@ async function loadVoskModel(langCode) {
     return false;
   }
 
+  // If we are already running this exact language, skip reloading!
+  if (currentModelLang === langCode && recognizer) {
+    return true; 
+  }
+
   els.listenStatus.textContent = `Loading ${LANG_MAP[langCode][1]} model...`;
   els.listenStatus.classList.add('show');
 
   try {
-    // 1. Build a perfectly accurate absolute URL (fixes the GitHub Pages path bug)
+    // 1. Build the absolute URL
     let currentUrl = window.location.href.split('?')[0].split('#')[0];
     if (!currentUrl.endsWith('/') && !currentUrl.endsWith('.html')) {
         currentUrl += '/'; 
@@ -818,26 +824,18 @@ async function loadVoskModel(langCode) {
     const baseUrl = currentUrl.substring(0, currentUrl.lastIndexOf('/') + 1);
     const absoluteModelUrl = baseUrl + modelFile;
 
-    // 2. DIAGNOSTIC TOOL: Explicitly test the URL before handing it to the AI
-    try {
-      const checkRes = await fetch(absoluteModelUrl, { method: 'HEAD' });
-      if (!checkRes.ok) {
-        alert("🚨 404 ERROR DETECTED 🚨\n\nThe app is looking for the file at this EXACT link:\n\n" + absoluteModelUrl + "\n\nBut the server says it is not there (Status " + checkRes.status + ").\n\nCheck your GitHub repository to make sure the file is uploaded, spelled perfectly, and not inside a sub-folder.");
-        els.listenStatus.classList.remove('show');
-        return false;
-      }
-    } catch (e) {
-      alert("🚨 NETWORK ERROR 🚨\n\nCould not connect to check the file at:\n" + absoluteModelUrl + "\n\nError details: " + e.message);
-      els.listenStatus.classList.remove('show');
-      return false;
+    // 2. MEMORY FIX: If a previous language was running, terminate its AI worker completely
+    // This prevents the browser from running out of RAM and crashing when switching languages.
+    if (currentModel) {
+      currentModel.terminate();
+      currentModel = null;
+      recognizer = null;
     }
 
-    // 3. Actually load the model into memory
-    if (!loadedModels[langCode]) {
-      loadedModels[langCode] = await Vosk.createModel(absoluteModelUrl);
-    }
-    
-    recognizer = new loadedModels[langCode].KaldiRecognizer(16000);
+    // 3. Load the new model and create the recognizer with the 16000Hz sample rate
+    currentModel = await Vosk.createModel(absoluteModelUrl);
+    recognizer = new currentModel.KaldiRecognizer(16000);
+    currentModelLang = langCode;
     
     recognizer.on("result", (message) => {
       const text = message.result.text;
@@ -856,8 +854,7 @@ async function loadVoskModel(langCode) {
     els.listenStatus.textContent = "Listening";
     return true;
   } catch (err) {
-    // If the file exists but Vosk crashes while reading it (e.g., corrupted .tar.gz)
-    alert("🚨 AI ENGINE CRASH 🚨\n\nVosk failed to read the model file. Error details:\n\n" + err.message);
+    alert("🚨 AI ENGINE CRASH 🚨\n\nVosk failed to load. Error details:\n\n" + err.message);
     els.listenStatus.classList.remove('show');
     return false;
   }
