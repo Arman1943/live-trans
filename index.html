@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="color-scheme" content="light dark">
+<title>Crossing — Live Split Translator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<!-- Vosk Browser library for offline speech recognition -->
+<script src="https://cdn.jsdelivr.net/npm/vosk-browser@0.0.8/dist/vosk.js"></script>
+<style>
+:root{
+  --ink:#161a2b;
+  --paper:#f2f4f5;
+  --paper-2:#e7eaec;
+  --navy:#1f2a44;
+  --navy-2:#2c3a5e;
+  --teal:#0f7d72;
+  --teal-2:#0a5d54;
+  --teal-soft:#e2f4f1;
+  --line:#d7dbdf;
+  --muted:#6b7280;
+  --danger:#b0432f;
+  --white:#ffffff;
+  --radius:18px;
+  --shadow: 0 8px 24px rgba(20,25,40,0.08);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Motion */
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-spring: cubic-bezier(.34,1.56,.64,1);
+  --dur-fast: .18s;
+  --dur-med: .32s;
+  --dur-slow: .5s;
+  /* Top panel colors (Source) */
+  --top-bg: #ffffff;
+  --top-text: #161a2b;
+  --top-muted: #6b7280;
+  /* Bottom panel colors (Target) */
+  --bot-bg: #1f2a44;
+  --bot-text: #ffffff;
+  --bot-muted: #9ba3b5;
+}
+[data-theme="dark"]{
+  --ink:#eef1f6;
+  --paper:#12141c;
+  --paper-2:#1a1d29;
+  --line:#2a2e3d;
+  --white:#1a1d29;
+  --top-bg: #1a1d29;
+  --top-text: #eef1f6;
+  --top-muted: #9099ab;
+  --bot-bg: #12141c;
+  --bot-text: #eef1f6;
+}
+*{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+html,body{height:100%;}
+body{
+  margin:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:'Inter', system-ui, -apple-system, sans-serif;
+  overscroll-behavior-y:none;
+}
+/* Respect reduced-motion preference: kill non-essential animation globally */
+.reduce-motion *, .reduce-motion *::before, .reduce-motion *::after{
+  animation-duration:.001ms !important;
+  animation-iteration-count:1 !important;
+  transition-duration:.001ms !important;
+  scroll-behavior:auto !important;
+}
+
+#app{
+  max-width: 100%;
+  margin:0 auto;
+  height:100vh;
+  height:100dvh;
+  display:flex;
+  flex-direction:column;
+  background:var(--paper);
+  position:relative;
+  overflow:hidden;
+}
+
+@keyframes fadeSlideDown{ from{opacity:0; transform:translateY(-10px);} to{opacity:1; transform:translateY(0);} }
+@keyframes fadeSlideUp{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
+@keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+@keyframes popIn{ from{opacity:0; transform:translate(-50%,-50%) scale(.4);} to{opacity:1; transform:translate(-50%,-50%) scale(1);} }
+
+header{
+  padding: calc(var(--safe-top) + 10px) 16px 10px;
+  display:flex;
+  align-items:center;
+  justify-content: space-between;
+  background:var(--top-bg);
+  color: var(--top-text);
+  z-index:10;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  animation: fadeSlideDown var(--dur-slow) var(--ease-out) both;
+}
+
+.icon-btn{
+  width:38px; height:38px; border-radius:50%; border:none;
+  background:transparent; display:flex; align-items:center; justify-content:center;
+  cursor:pointer; color:inherit; flex-shrink:0; transition:background var(--dur-fast), transform var(--dur-fast);
+}
+.icon-btn:active{transform:scale(0.9); background: rgba(128,128,128,0.12);}
+.icon-btn svg{width:22px; height:22px;}
+
+/* Split View Layout */
+.split-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+}
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.panel-top {
+  background: var(--top-bg);
+  color: var(--top-text);
+  padding-top: calc(var(--safe-top) + 60px);
+  animation: fadeIn var(--dur-slow) var(--ease-out) both;
+}
+
+.panel-bottom {
+  background: var(--bot-bg);
+  color: var(--bot-text);
+  padding-bottom: calc(var(--safe-bottom) + 80px);
+  animation: fadeIn var(--dur-slow) var(--ease-out) .08s both;
+}
+
+.text-area-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  scroll-behavior: smooth;
+  position: relative;
+}
+
+.bubble-list{
+  font-size: 28px;
+  line-height: 1.4;
+  font-weight: 500;
+  margin-bottom: auto;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.bubble{
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  contain: content;
+}
+.bubble.interim{ opacity:.5; }
+.bubble.final{ opacity:1; }
+.bubble.bubble-in{ animation: bubbleIn var(--dur-med) var(--ease-out) both; }
+@keyframes bubbleIn{
+  from{ opacity:0; transform: translateY(10px); }
+  to{ opacity:1; transform: translateY(0); }
+}
+
+.dots{ display:inline-flex; gap:5px; align-items:center; height:1em; vertical-align:middle; }
+.dots span{
+  width:6px; height:6px; border-radius:50%; background:currentColor; opacity:.35;
+  animation: dotPulse 1.1s ease-in-out infinite;
+}
+.dots span:nth-child(2){ animation-delay:.15s; }
+.dots span:nth-child(3){ animation-delay:.3s; }
+@keyframes dotPulse{
+  0%,80%,100%{ transform:scale(.55); opacity:.3; }
+  40%{ transform:scale(1); opacity:1; }
+}
+
+.empty-state{
+  position:absolute;
+  left:20px; right:20px; bottom:20px;
+  font-size:16px;
+  font-weight:500;
+  color: var(--top-muted);
+  transition: opacity var(--dur-med) var(--ease-out);
+  pointer-events:none;
+}
+.panel-bottom .empty-state{ color: var(--bot-muted); top:20px; bottom:auto; }
+
+.lang-selector-wrap {
+  position: absolute;
+  bottom: 16px;
+  left: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.panel-top .lang-selector-wrap { bottom: 16px; }
+.panel-bottom .lang-selector-wrap { top: 16px; bottom: auto; }
+
+.lang-select-btn {
+  background: rgba(128, 128, 128, 0.15);
+  border: none;
+  border-radius: 20px;
+  padding: 8px 16px;
+  color: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(5px);
+  transition: background var(--dur-fast), transform var(--dur-fast);
+}
+.lang-select-btn:active{ transform: scale(.96); background: rgba(128,128,128,0.25); }
+.lang-select-btn svg { width: 14px; height: 14px; opacity: 0.7; transition: transform var(--dur-fast); }
+
+.swap-btn-split {
+  width: 44px; height: 44px; border-radius: 50%;
+  background: var(--teal); color: white;
+  display: flex; align-items: center; justify-content: center;
+  border: 4px solid var(--paper);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  transition: transform var(--dur-med) var(--ease-spring), box-shadow var(--dur-fast);
+  animation: popIn var(--dur-slow) var(--ease-spring) .25s both;
+}
+[data-theme="dark"] .swap-btn-split { border-color: var(--line); }
+.swap-btn-split:active{ box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+.swap-btn-split.spin{ transform: translate(-50%, -50%) rotate(180deg) scale(1.08); }
+.swap-btn-split svg { width: 20px; height: 20px; }
+
+.controls-bar {
+  position: absolute;
+  bottom: calc(var(--safe-bottom) + 20px);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 10;
+  gap: 20px;
+  animation: fadeSlideUp var(--dur-slow) var(--ease-out) .15s both;
+}
+
+.mic-btn-main {
+  width: 64px; height: 64px; border-radius: 50%; border: none;
+  background: var(--white); color: var(--teal);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+  transition: transform var(--dur-fast) var(--ease-spring), background var(--dur-med), color var(--dur-med);
+  position: relative;
+}
+.mic-btn-main:active { transform: scale(0.92); }
+.mic-btn-main.listening { background: var(--danger); color: white; }
+.mic-btn-main.listening::before,
+.mic-btn-main.listening::after{
+  content:''; position:absolute; inset:0; border-radius:50%;
+  border:2px solid var(--danger);
+  animation: micRing 1.8s ease-out infinite;
+}
+.mic-btn-main.listening::after{ animation-delay: .6s; }
+@keyframes micRing{
+  0%{ transform:scale(1); opacity:.55; }
+  100%{ transform:scale(1.9); opacity:0; }
+}
+.mic-icon-wrap{ position:relative; width:28px; height:28px; }
+.mic-icon-wrap svg{
+  position:absolute; inset:0; width:28px; height:28px;
+  transition: opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.icon-mic{ opacity:1; transform: scale(1) rotate(0deg); }
+.icon-stop{ opacity:0; transform: scale(.4) rotate(-45deg); }
+.mic-btn-main.listening .icon-mic{ opacity:0; transform: scale(.4) rotate(45deg); }
+.mic-btn-main.listening .icon-stop{ opacity:1; transform: scale(1) rotate(0deg); }
+
+.secondary-btn {
+  width: 48px; height: 48px; border-radius: 50%; border: none;
+  background: rgba(255,255,255,0.15); color: var(--bot-text);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; backdrop-filter: blur(5px);
+  transition: transform var(--dur-fast) var(--ease-spring), background var(--dur-fast);
+}
+.secondary-btn:active{ transform: scale(.9); background: rgba(255,255,255,0.28); }
+.secondary-btn svg { width: 20px; height: 20px; transition: transform var(--dur-med) var(--ease-spring); }
+.secondary-btn.pulse svg{ transform: rotate(-18deg) scale(1.15); }
+.secondary-btn.speaking svg{ animation: speakBounce .6s ease-in-out infinite; }
+@keyframes speakBounce{ 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.15); } }
+
+.modal-overlay{
+  position:absolute; inset:0; background:rgba(10,12,20,0.6); z-index:30;
+  display:flex; align-items:flex-end; opacity:0; pointer-events:none;
+  transition: opacity var(--dur-med) var(--ease-out), backdrop-filter var(--dur-med) var(--ease-out);
+  backdrop-filter: blur(0px);
+}
+.modal-overlay.show{ opacity:1; pointer-events:auto; backdrop-filter: blur(3px); }
+.modal{
+  background:var(--paper); width:100%; border-radius:20px 20px 0 0;
+  padding:0; transform:translateY(100%);
+  transition: transform var(--dur-med) var(--ease-spring);
+  max-height:85vh; display:flex; flex-direction:column;
+}
+.modal-overlay.show .modal{ transform:translateY(0); }
+.modal-header {
+  padding: 20px 20px 10px; display:flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--line);
+}
+.modal-header h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--ink); }
+.close-modal-btn { background: transparent; border: none; color: var(--muted); cursor: pointer; padding: 4px; border-radius:50%; transition: background var(--dur-fast), transform var(--dur-fast); }
+.close-modal-btn:active{ transform: scale(.88); background: rgba(128,128,128,.15); }
+.close-modal-btn svg { width: 24px; height: 24px; }
+
+.lang-list {
+  overflow-y: auto; padding: 10px 0; flex: 1;
+}
+.lang-item {
+  padding: 14px 20px; display: flex; align-items: center; gap: 12px;
+  cursor: pointer; color: var(--ink); border-bottom: 1px solid rgba(128,128,128,0.1);
+  transition: background var(--dur-fast);
+}
+.lang-item:active { background: var(--paper-2); }
+.lang-item.selected { color: var(--teal); font-weight: 600; background: var(--teal-soft); }
+.lang-item-flag { font-size: 20px; }
+.lang-item-name{ flex:1; }
+.lang-item-check{
+  width:18px; height:18px; color: var(--teal); flex-shrink:0;
+  transform: scale(0); opacity:0;
+  transition: transform var(--dur-fast) var(--ease-spring), opacity var(--dur-fast);
+}
+.lang-item.selected .lang-item-check{ transform: scale(1); opacity:1; }
+.lang-item-check svg{ width:100%; height:100%; }
+
+.status-indicator {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-6px);
+  background: rgba(0,0,0,0.5);
+  color: white;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+}
+.status-indicator.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.status-wave{ display:flex; gap:2px; align-items:center; height:10px; }
+.status-wave span{
+  width:2.5px; border-radius:2px; background:#4ade80;
+  animation: waveBar 1s ease-in-out infinite;
+}
+.status-wave span:nth-child(1){ height:5px; animation-delay:0s; }
+.status-wave span:nth-child(2){ height:10px; animation-delay:.15s; }
+.status-wave span:nth-child(3){ height:7px; animation-delay:.3s; }
+.status-wave span:nth-child(4){ height:9px; animation-delay:.45s; }
+@keyframes waveBar{ 0%,100%{ transform:scaleY(.4); } 50%{ transform:scaleY(1); } }
+
+#toast{
+  position:absolute; top:calc(var(--safe-top) + 20px); left:50%; transform:translateX(-50%) translateY(-24px) scale(.95);
+  background:var(--ink); color:var(--paper); padding:10px 20px; border-radius:99px; font-size:14px;
+  opacity:0; pointer-events:none; transition: opacity var(--dur-med) var(--ease-spring), transform var(--dur-med) var(--ease-spring);
+  z-index:50; white-space:nowrap;
+  box-shadow: var(--shadow);
+}
+#toast.show{ opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+
+.clear-btn {
+  position: absolute;
+  top: calc(var(--safe-top) + 16px);
+  right: 16px;
+  background: rgba(128,128,128,0.1);
+  border: none;
+  border-radius: 50%;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--top-text);
+  cursor: pointer;
+  z-index: 10;
+  transition: transform var(--dur-fast) var(--ease-spring), background var(--dur-fast);
+}
+.clear-btn:active{ transform: scale(.88) rotate(-8deg); background: rgba(128,128,128,.2); }
+.clear-btn svg { width: 18px; height: 18px; }
+
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header>
+    <div style="width:38px"></div>
+    <button class="clear-btn" id="clearBtn" aria-label="Clear text" style="position:static;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6h14z"/></svg>
+    </button>
+  </header>
+
+  <div class="split-container">
+    <!-- Top Panel (Source text, usually what you say) -->
+    <div class="panel panel-top">
+      <div class="status-indicator" id="listenStatus">
+        <div class="status-wave"><span></span><span></span><span></span><span></span></div>
+        <span id="listenStatusText">Listening</span>
+      </div>
+
+      <div class="text-area-container" id="sourceContainer">
+        <div class="bubble-list" id="sourceList"></div>
+        <div class="empty-state" id="sourceEmpty">Say something to begin</div>
+      </div>
+
+      <div class="lang-selector-wrap">
+        <button class="lang-select-btn" id="sourceLangBtn">
+          <span id="sourceLangFlag">🇬🇧</span> <span id="sourceLangName">English</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Swap Button -->
+    <button class="swap-btn-split" id="swapBtn" aria-label="Swap languages">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M7 16V4M7 4L3 8M7 4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/></svg>
+    </button>
+
+    <!-- Bottom Panel (Translated text, usually what the other person reads) -->
+    <div class="panel panel-bottom">
+      <div class="lang-selector-wrap">
+        <button class="lang-select-btn" id="targetLangBtn">
+          <span id="targetLangFlag">🇪🇸</span> <span id="targetLangName">Spanish</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button class="icon-btn" id="rotateBtn" style="background: rgba(255,255,255,0.1); color: white;" title="Flip text for person opposite you">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+        </button>
+      </div>
+
+      <div class="text-area-container" id="targetContainer">
+        <div class="bubble-list" id="targetList" style="transition: transform var(--dur-med) var(--ease-out);" aria-live="polite"></div>
+        <div class="empty-state" id="targetEmpty">Translation appears here</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Main Controls -->
+  <div class="controls-bar">
+    <button class="secondary-btn" id="themeBtn" aria-label="Toggle Theme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+    </button>
+    <button class="mic-btn-main" id="micBtn" aria-label="Toggle microphone">
+      <span class="mic-icon-wrap">
+        <svg class="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+        <svg class="icon-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+      </span>
+    </button>
+    <button class="secondary-btn" id="speakBtn" aria-label="Speak Translation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19 5a9 9 0 010 14M15.5 8.5a4.5 4.5 0 010 7"/></svg>
+    </button>
+  </div>
+
+  <!-- Language Selection Modal -->
+  <div class="modal-overlay" id="langOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3 id="langModalTitle">Select Language</h3>
+        <button class="close-modal-btn" id="closeLangBtn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="lang-list" id="langList"><!-- populated once by JS --></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(function(){
+
+// List of general languages
+const LANGS = [
+  ["ar","Arabic","🇸🇦"], ["bn","Bengali","🇧🇩"], ["zh","Chinese (Simp)","🇨🇳"],
+  ["zh-TW","Chinese (Trad)","🇹🇼"], ["nl","Dutch","🇳🇱"], ["en","English","🇬🇧"],
+  ["fr","French","🇫🇷"], ["de","German","🇩🇪"], ["hi","Hindi","🇮🇳"],
+  ["id","Indonesian","🇮🇩"], ["it","Italian","🇮🇹"], ["ja","Japanese","🇯🇵"],
+  ["ko","Korean","🇰🇷"], ["pl","Polish","🇵🇱"], ["pt","Portuguese","🇵🇹"],
+  ["ro","Romanian","🇷🇴"], ["ru","Russian","🇷🇺"], ["es","Spanish","🇪🇸"],
+  ["sw","Swahili","🇰🇪"], ["ta","Tamil","🇮🇳"], ["th","Thai","🇹🇭"],
+  ["tr","Turkish","🇹🇷"], ["uk","Ukrainian","🇺🇦"], ["vi","Vietnamese","🇻🇳"]
+];
+const LANG_MAP = Object.fromEntries(LANGS.map(l=>[l[0],l]));
+const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+
+// Map language codes to the exact Vosk model filenames you plan to host
+const VOSK_MODELS = {
+  'en': 'vosk-model-small-en-us.tar.gz',
+  'es': 'vosk-model-small-es.tar.gz',
+  'fr': 'vosk-model-small-fr-0.22.tar.gz',
+  'de': 'vosk-model-small-de-0.15.tar.gz',
+  'it': 'vosk-model-small-it.tar.gz',
+  'ja': 'vosk-model-small-ja.tar.gz',
+  'ru': 'vosk-model-small-ru-0.22.tar.gz',
+  'zh': 'vosk-model-small-cn-0.22.tar.gz'
+  // Remember to actually download these files and put them in your folder
+};
+
+const loadedModels = {};
+let recognizer = null;
+let audioContext = null;
+
+let state = {
+  sourceLang: 'en',
+  targetLang: 'es',
+  isListening: false,
+  isRotated: false,
+  dark: false,
+  exchanges: [],   // {id, sourceEl, targetEl, controller, finalized}
+  current: null,   // in-progress exchange, or null
+  selectingFor: null
+};
+
+const els = {
+  sourceLangBtn: document.getElementById('sourceLangBtn'),
+  targetLangBtn: document.getElementById('targetLangBtn'),
+  sourceLangName: document.getElementById('sourceLangName'),
+  sourceLangFlag: document.getElementById('sourceLangFlag'),
+  targetLangName: document.getElementById('targetLangName'),
+  targetLangFlag: document.getElementById('targetLangFlag'),
+  swapBtn: document.getElementById('swapBtn'),
+  micBtn: document.getElementById('micBtn'),
+  clearBtn: document.getElementById('clearBtn'),
+  rotateBtn: document.getElementById('rotateBtn'),
+  themeBtn: document.getElementById('themeBtn'),
+  speakBtn: document.getElementById('speakBtn'),
+
+  sourceList: document.getElementById('sourceList'),
+  targetList: document.getElementById('targetList'),
+  sourceEmpty: document.getElementById('sourceEmpty'),
+  targetEmpty: document.getElementById('targetEmpty'),
+  sourceContainer: document.getElementById('sourceContainer'),
+  targetContainer: document.getElementById('targetContainer'),
+
+  langOverlay: document.getElementById('langOverlay'),
+  langList: document.getElementById('langList'),
+  closeLangBtn: document.getElementById('closeLangBtn'),
+  langModalTitle: document.getElementById('langModalTitle'),
+
+  listenStatus: document.getElementById('listenStatus'),
+  listenStatusText: document.getElementById('listenStatusText'),
+  toast: document.getElementById('toast')
+};
+
+let exchangeCounter = 0;
+let scrollScheduled = false;
+
+const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+function applyMotionPref(){ document.body.classList.toggle('reduce-motion', motionQuery.matches); }
+applyMotionPref();
+motionQuery.addEventListener?.('change', applyMotionPref);
+
+function vibrate(ms){ if (navigator.vibrate) { try { navigator.vibrate(ms); } catch(e){} } }
+
+function saveState() {
+  const data = {
+    sourceLang: state.sourceLang,
+    targetLang: state.targetLang,
+    exchanges: state.exchanges.map(ex => ({
+      id: ex.id,
+      sourceText: ex.sourceEl.textContent,
+      targetText: ex.targetEl.textContent,
+      finalized: ex.finalized
+    }))
+  };
+  localStorage.setItem('splitTranslatorState', JSON.stringify(data));
+}
+
+function loadState() {
+  const raw = localStorage.getItem('splitTranslatorState');
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if (data.sourceLang) state.sourceLang = data.sourceLang;
+    if (data.targetLang) state.targetLang = data.targetLang;
+
+    if (data.exchanges && Array.isArray(data.exchanges)) {
+      data.exchanges.forEach(exData => {
+        const sEl = document.createElement('div');
+        sEl.className = exData.finalized ? 'bubble final' : 'bubble interim';
+        sEl.dataset.id = exData.id;
+        sEl.textContent = exData.sourceText;
+        els.sourceList.appendChild(sEl);
+
+        const tEl = document.createElement('div');
+        tEl.className = exData.finalized ? 'bubble final' : 'bubble interim';
+        tEl.dataset.id = exData.id;
+        tEl.textContent = exData.targetText;
+        els.targetList.appendChild(tEl);
+
+        state.exchanges.push({
+          id: exData.id,
+          sourceEl: sEl,
+          targetEl: tEl,
+          controller: null,
+          finalized: exData.finalized
+        });
+        exchangeCounter = Math.max(exchangeCounter, exData.id);
+      });
+      scrollToEndSoon();
+    }
+  } catch (e) {
+    console.error('Failed to load saved conversations:', e);
+  }
+}
+
+function updateLangUI() {
+  const s = LANG_MAP[state.sourceLang];
+  els.sourceLangName.textContent = s[1];
+  els.sourceLangFlag.textContent = s[2];
+
+  const t = LANG_MAP[state.targetLang];
+  els.targetLangName.textContent = t[1];
+  els.targetLangFlag.textContent = t[2];
+  saveState();
+}
+
+function toggleRotate() {
+  state.isRotated = !state.isRotated;
+  els.targetList.style.transform = state.isRotated ? 'rotate(180deg)' : 'none';
+  els.rotateBtn.style.background = state.isRotated ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.1)';
+  els.rotateBtn.style.transform = state.isRotated ? 'rotate(180deg)' : 'none';
+}
+
+function toggleTheme() {
+  state.dark = !state.dark;
+  document.body.setAttribute('data-theme', state.dark ? 'dark' : 'light');
+  els.themeBtn.classList.add('pulse');
+  setTimeout(()=>els.themeBtn.classList.remove('pulse'), 320);
+}
+
+function scrollToEndSoon() {
+  if (scrollScheduled) return;
+  scrollScheduled = true;
+  requestAnimationFrame(() => {
+    els.sourceContainer.scrollTop = els.sourceContainer.scrollHeight;
+    els.targetContainer.scrollTop = els.targetContainer.scrollHeight;
+    scrollScheduled = false;
+  });
+}
+
+function updateEmptyState() {
+  const hasContent = state.exchanges.length > 0;
+  els.sourceEmpty.style.opacity = hasContent ? '0' : '1';
+  els.targetEmpty.style.opacity = hasContent ? '0' : '1';
+  els.targetEmpty.textContent = state.isListening ? 'Listening…' : 'Translation appears here';
+}
+
+function beginExchange() {
+  const id = ++exchangeCounter;
+  const sEl = document.createElement('div');
+  sEl.className = 'bubble interim';
+  sEl.dataset.id = id;
+  els.sourceList.appendChild(sEl);
+
+  const tEl = document.createElement('div');
+  tEl.className = 'bubble interim';
+  tEl.dataset.id = id;
+  els.targetList.appendChild(tEl);
+
+  const ex = { id, sourceEl: sEl, targetEl: tEl, controller: null, finalized: false };
+  state.exchanges.push(ex);
+  state.current = ex;
+  updateEmptyState();
+  return ex;
+}
+
+function getCurrentExchange() {
+  if (!state.current || state.current.finalized) return beginExchange();
+  return state.current;
+}
+
+function showDots(el) {
+  el.innerHTML = '<span class="dots"><span></span><span></span><span></span></span>';
+}
+
+function promote(el) {
+  el.classList.remove('interim');
+  el.classList.add('final', 'bubble-in');
+  el.addEventListener('animationend', () => el.classList.remove('bubble-in'), { once: true });
+}
+
+function clearText() {
+  state.exchanges.forEach(ex => ex.controller && ex.controller.abort());
+  state.exchanges = [];
+  state.current = null;
+  els.sourceList.innerHTML = '';
+  els.targetList.innerHTML = '';
+  updateEmptyState();
+  saveState();
+}
+
+async function translateTextAPI(text, source, target, signal) {
+  if (!text.trim()) return '';
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${source}|${target}`;
+  const res = await fetch(url, { signal });
+  const data = await res.json();
+  if (data.responseStatus !== 200 && data.responseStatus !== '200') throw new Error('bad response');
+  const ta = document.createElement('textarea');
+  ta.innerHTML = data.responseData.translatedText;
+  return ta.value;
+}
+
+// Throttled continuous live translation
+let isTranslating = false;
+let pendingInterimText = null;
+let lastCallTime = 0;
+
+function translateInterim(ex, text) {
+  if (ex.finalized) return;
+  pendingInterimText = text;
+
+  if (isTranslating) return; 
+
+  const now = Date.now();
+  const delay = 300; // 300ms throttle for "live" feel
+  const wait = Math.max(0, delay - (now - lastCallTime));
+
+  isTranslating = true;
+  setTimeout(async () => {
+    if (ex.finalized || !pendingInterimText) {
+      isTranslating = false;
+      return;
+    }
+
+    const textToTranslate = pendingInterimText;
+    pendingInterimText = null;
+    lastCallTime = Date.now();
+
+    if (ex.controller) ex.controller.abort();
+    const controller = new AbortController();
+    ex.controller = controller;
+    
+    if (!ex.targetEl.textContent) showDots(ex.targetEl);
+
+    try {
+      const translated = await translateTextAPI(textToTranslate, state.sourceLang, state.targetLang, controller.signal);
+      if (!controller.signal.aborted && !ex.finalized) {
+        ex.targetEl.textContent = translated;
+        scrollToEndSoon();
+        saveState();
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        ex.targetEl.textContent = textToTranslate; 
+      }
+    } finally {
+      isTranslating = false;
+      if (pendingInterimText && !ex.finalized) {
+        translateInterim(ex, pendingInterimText);
+      }
+    }
+  }, wait);
+}
+
+async function finalizeExchange(finalText) {
+  const ex = getCurrentExchange();
+  ex.sourceEl.textContent = finalText;
+  promote(ex.sourceEl);
+  ex.finalized = true;
+  if (ex.controller) ex.controller.abort();
+  showDots(ex.targetEl);
+  try {
+    const translated = await translateTextAPI(finalText, state.sourceLang, state.targetLang);
+    ex.targetEl.textContent = translated || finalText;
+  } catch (e) {
+    ex.targetEl.textContent = finalText;
+  }
+  promote(ex.targetEl);
+  state.current = null;
+  scrollToEndSoon();
+  saveState();
+}
+
+async function loadVoskModel(langCode) {
+  const modelFile = VOSK_MODELS[langCode];
+  
+  if (!modelFile) {
+    showToast(`Offline model not configured for ${LANG_MAP[langCode][1]}`);
+    return false;
+  }
+
+  els.listenStatusText.textContent = `Loading ${LANG_MAP[langCode][1]} model...`;
+  els.listenStatus.classList.add('show');
+
+  try {
+    if (!loadedModels[langCode]) {
+      loadedModels[langCode] = await Vosk.createModel(modelFile);
+    }
+    
+    if (recognizer) {
+      recognizer.free();
+    }
+    
+    recognizer = new loadedModels[langCode].KaldiRecognizer();
+    
+    recognizer.on("result", (message) => {
+      const text = message.result.text;
+      if (text) finalizeExchange(text);
+    });
+    
+    recognizer.on("partialresult", (message) => {
+      const text = message.result.partial;
+      if (text) {
+        const ex = getCurrentExchange();
+        ex.sourceEl.textContent = text;
+        translateInterim(ex, text);
+      }
+    });
+
+    els.listenStatusText.textContent = "Listening";
+    return true;
+  } catch (err) {
+    console.error(err);
+    showToast("Failed to load model file.");
+    els.listenStatus.classList.remove('show');
+    return false;
+  }
+}
+
+function updateMicUI() {
+  if (state.isListening) {
+    els.micBtn.classList.add('listening');
+    els.listenStatus.classList.add('show');
+    els.listenStatusText.textContent = "Listening";
+  } else {
+    els.micBtn.classList.remove('listening');
+    els.listenStatus.classList.remove('show');
+  }
+  updateEmptyState();
+}
+
+async function startListening() {
+  const success = await loadVoskModel(state.sourceLang);
+  if (!success) return; 
+
+  try {
+    if (!audioContext || audioContext.state === 'closed') {
+      const mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1, sampleRate: 16000 }
+      });
+      
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioContextClass({ sampleRate: 16000 });
+      
+      // Fallback for older browsers
+      const createScriptProcessor = audioContext.createScriptProcessor || audioContext.createJavaScriptNode;
+      const recognizerNode = createScriptProcessor.call(audioContext, 4096, 1, 1);
+      
+      recognizerNode.onaudioprocess = (event) => {
+        try {
+          if (state.isListening && recognizer) {
+            recognizer.acceptWaveform(event.inputBuffer);
+          }
+        } catch (error) {
+          console.error('Audio processing failed', error);
+        }
+      };
+      
+      const source = audioContext.createMediaStreamSource(mediaStream);
+      source.connect(recognizerNode);
+      recognizerNode.connect(audioContext.destination);
+    } else if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
+    
+    state.isListening = true;
+    updateMicUI();
+    vibrate(12);
+  } catch (e) {
+    console.error("Mic error:", e);
+    showToast("Microphone access denied or unavailable");
+  }
+}
+
+function stopListening() {
+  state.isListening = false;
+  updateMicUI();
+  if (audioContext && audioContext.state === 'running') {
+    audioContext.suspend();
+  }
+}
+
+function toggleMic() {
+  if (state.isListening) stopListening();
+  else startListening();
+}
+
+function buildLangList() {
+  els.langList.innerHTML = LANGS.map(l => `
+    <div class="lang-item" data-code="${l[0]}">
+      <span class="lang-item-flag">${l[2]}</span>
+      <span class="lang-item-name">${l[1]}</span>
+      <span class="lang-item-check">${CHECK_SVG}</span>
+    </div>
+  `).join('');
+}
+
+els.langList.addEventListener('click', (e) => {
+  const item = e.target.closest('.lang-item');
+  if (!item) return;
+  const code = item.dataset.code;
+  const type = state.selectingFor;
+  if (!type) return;
+
+  if (type === 'source') {
+    if (state.targetLang === code) state.targetLang = state.sourceLang;
+    state.sourceLang = code;
+    
+    // Automatically swap the model streaming if currently listening
+    if (state.isListening) {
+      stopListening();
+      startListening(); 
+    }
+  } else {
+    if (state.sourceLang === code) state.sourceLang = state.targetLang;
+    state.targetLang = code;
+    const last = state.exchanges[state.exchanges.length - 1];
+    if (last) {
+      translateTextAPI(last.sourceEl.textContent, state.sourceLang, state.targetLang)
+        .then(t => { 
+          last.targetEl.textContent = t; 
+          saveState();
+        })
+        .catch(() => {});
+    }
+  }
+  updateLangUI();
+  closeLangModal();
+});
+
+function openLangModal(type) {
+  state.selectingFor = type;
+  els.langModalTitle.textContent = type === 'source' ? 'Select Spoken Language' : 'Select Translation Language';
+  const current = state[`${type}Lang`];
+  els.langList.querySelectorAll('.lang-item').forEach(el => {
+    el.classList.toggle('selected', el.dataset.code === current);
+  });
+  els.langOverlay.classList.add('show');
+}
+
+function closeLangModal() {
+  els.langOverlay.classList.remove('show');
+}
+
+function speakTranslation() {
+  const last = state.exchanges[state.exchanges.length - 1];
+  const text = last ? last.targetEl.textContent : '';
+  if (!text || text.trim() === '') return;
+
+  if (!('speechSynthesis' in window)) { showToast('Speech synth not supported'); return; }
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = state.targetLang;
+  els.speakBtn.classList.add('speaking');
+  u.onend = () => els.speakBtn.classList.remove('speaking');
+  u.onerror = () => els.speakBtn.classList.remove('speaking');
+  window.speechSynthesis.speak(u);
+}
+
+function showToast(msg, dur = 2000) {
+  els.toast.textContent = msg;
+  els.toast.classList.add('show');
+  setTimeout(() => els.toast.classList.remove('show'), dur);
+}
+
+function swapLanguages() {
+  const temp = state.sourceLang;
+  state.sourceLang = state.targetLang;
+  state.targetLang = temp;
+
+  const srcChildren = Array.from(els.sourceList.children);
+  const tgtChildren = Array.from(els.targetList.children);
+  els.sourceList.innerHTML = '';
+  els.targetList.innerHTML = '';
+  tgtChildren.forEach(c => els.sourceList.appendChild(c));
+  srcChildren.forEach(c => els.targetList.appendChild(c));
+
+  state.exchanges.forEach(ex => {
+    const t = ex.sourceEl; ex.sourceEl = ex.targetEl; ex.targetEl = t;
+  });
+
+  updateLangUI();
+  updateEmptyState();
+  saveState();
+
+  if (state.isListening) {
+    stopListening();
+    startListening();
+  }
+}
+
+// Wire up events
+els.sourceLangBtn.addEventListener('click', () => openLangModal('source'));
+els.targetLangBtn.addEventListener('click', () => openLangModal('target'));
+els.closeLangBtn.addEventListener('click', closeLangModal);
+els.langOverlay.addEventListener('click', (e) => { if (e.target === els.langOverlay) closeLangModal(); });
+
+els.swapBtn.addEventListener('click', () => {
+  vibrate(8);
+  els.swapBtn.classList.add('spin');
+  setTimeout(() => els.swapBtn.classList.remove('spin'), 320);
+  swapLanguages();
+});
+
+els.micBtn.addEventListener('click', toggleMic);
+els.clearBtn.addEventListener('click', clearText);
+els.rotateBtn.addEventListener('click', toggleRotate);
+els.themeBtn.addEventListener('click', toggleTheme);
+els.speakBtn.addEventListener('click', speakTranslation);
+
+// Init
+buildLangList();
+loadState();
+updateLangUI();
+updateEmptyState();
+
+if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+  toggleTheme();
+}
+
+})();
+</script>
+</body>
+</html>
